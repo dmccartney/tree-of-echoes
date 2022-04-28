@@ -4,16 +4,17 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/proxy/Clones.sol";
-import "./ITree.sol";
+import "./IRenderer.sol";
 
 contract Echo is ERC721 {
     // This configuration is supplied during a clone's initialization.
     struct Config {
         address treeAddress;
         address authorAddress;
+        // The generation ("batch") of this Echo.
+        uint128 generationId;
         // The price to mint (zero indicates free).
-        uint256 price;
+        uint112 price;
         // The number that have been minted.
         uint8 totalSupply;
         // The number that _can_ be minted (zero indicates no-limit).
@@ -43,17 +44,25 @@ contract Echo is ERC721 {
         _;
     }
 
-    constructor() ERC721("Echo", "ECHO") {}
+    constructor() ERC721("", "") {}
 
     // When a clone is initialized, it gets the author's address and supply limit.
     function initialize(
         address treeAddress,
         address authorAddress,
-        uint256 price,
+        uint128 generationId,
+        uint112 price,
         uint8 supplyLimit
     ) external {
         require(config.treeAddress == address(0), "Echo: already configured");
-        config = Config(treeAddress, authorAddress, price, 0, supplyLimit);
+        config = Config(
+            treeAddress,
+            authorAddress,
+            generationId,
+            price,
+            0,
+            supplyLimit
+        );
         // One token goes to the author.
         _mint(authorAddress, generateTokenId());
         // Another token goes to the tree.
@@ -61,9 +70,22 @@ contract Echo is ERC721 {
         // The remaining are for sale.
     }
 
+    function name() public view virtual override returns (string memory) {
+        return "Echo";
+    }
+
+    function symbol() public view virtual override returns (string memory) {
+        return "ECHO";
+    }
+
     // This allows the author to control the OpenSea collection listing.
     function owner() public view virtual returns (address) {
         return config.authorAddress;
+    }
+
+    // Reports the generation ("batch") of this Echo.
+    function generation() public view virtual returns (uint128) {
+        return config.generationId;
     }
 
     // The number that have been minted.
@@ -75,9 +97,20 @@ contract Echo is ERC721 {
         return config;
     }
 
-    // The prefix used to construct each token's URI, provided by the Tree.
-    function _baseURI() internal view virtual override returns (string memory) {
-        return ITree(config.treeAddress).echoBaseURI(address(this));
+    // We ask the Tree for the token URI.
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        virtual
+        override
+        returns (string memory)
+    {
+        return
+            IRenderer(config.treeAddress).echoTokenURI(
+                config.generationId,
+                address(this),
+                tokenId
+            );
     }
 
     //
@@ -89,7 +122,7 @@ contract Echo is ERC721 {
         _safeMint(msg.sender, generateTokenId());
     }
 
-    function mintPrice() external view returns (uint256) {
+    function mintPrice() external view returns (uint112) {
         return config.price;
     }
 
@@ -123,7 +156,7 @@ contract Echo is ERC721 {
     }
 
     // Update the author address for the echo.
-    function updatePrice(uint256 price) external onlyAuthor {
+    function updatePrice(uint112 price) external onlyAuthor {
         config.price = price;
     }
 

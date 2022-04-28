@@ -7,12 +7,23 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "./Echo.sol";
-import "./ITree.sol";
+import "./IRenderer.sol";
 
-contract Tree is Ownable, ITree, ReentrancyGuard {
+// This lets authors create Echos -- stories drafted on the coven website and memorialized on chain.
+//
+// Each Echo is an ERC721 contract created with its own address.
+// The author can set the price and supply limits (or make it free and unlimited).
+// See createEcho()
+//
+// Each Echo also belongs to a "generation". The generations are used by the Tree
+// to find the corresponding storage URIs. At first each generation is served
+// from the coven website. But as each generation is "sealed" to IPFS the Tree
+// begins pointing at IPFS for the Echos in that generation.
+// See sealToIPFS(), setGenerationId()
+//
+contract Tree is Ownable, IRenderer, ReentrancyGuard {
     using EnumerableSet for EnumerableSet.AddressSet;
     using Address for address;
 
@@ -25,8 +36,9 @@ contract Tree is Ownable, ITree, ReentrancyGuard {
 
     EnumerableSet.AddressSet echos;
 
-    address immutable echoImplementation;
-    string baseURI;
+    address immutable echoImplementation; // contains the byte code for created Echoes
+    address renderer; // IRenderer that produces echo token URIs
+    uint128 generationId;
 
     constructor() {
         // Deploys the implementation that will be cloned for each Echo.
@@ -57,7 +69,7 @@ contract Tree is Ownable, ITree, ReentrancyGuard {
     // NOTE: `price` can be modified later via Echo.updatePrice()
     function createEcho(
         bytes32 identifier,
-        uint256 price,
+        uint112 price,
         uint8 supplyLimit
     ) external returns (address) {
         // TODO: consider using a captcha or requiring nominal payment
@@ -69,6 +81,7 @@ contract Tree is Ownable, ITree, ReentrancyGuard {
         Echo(echoAddress).initialize(
             address(this),
             msg.sender,
+            generationId,
             price,
             supplyLimit
         );
@@ -76,22 +89,22 @@ contract Tree is Ownable, ITree, ReentrancyGuard {
         return echoAddress;
     }
 
-    // This gives the base URI that is used by all of the Echos to create token URIs.
-    function echoBaseURI(address echoAddress)
-        external
-        view
-        override
-        returns (string memory)
-    {
-        require(echos.contains(echoAddress), "unknown echo");
+    function echoTokenURI(
+        uint128 echoGenerationId,
+        address echoAddress,
+        uint256 tokenId
+    ) external view override returns (string memory) {
+        require(echos.contains(echoAddress), "Tree: unknown echo");
         return
-            string(
-                abi.encodePacked(
-                    baseURI,
-                    Strings.toHexString(uint160(echoAddress), 20),
-                    "/"
-                )
+            IRenderer(renderer).echoTokenURI(
+                echoGenerationId,
+                echoAddress,
+                tokenId
             );
+    }
+
+    function setRenderer(address _renderer) external onlyOwner {
+        renderer = _renderer;
     }
 
     //
@@ -109,6 +122,11 @@ contract Tree is Ownable, ITree, ReentrancyGuard {
     // Admin methods
     //
 
+    // Updates the generation ("batch") for all subsequently created Echoes.
+    function setGenerationId(uint128 _generationId) external onlyOwner {
+        generationId = _generationId;
+    }
+
     // Removes the echo from the tree.
     function removeEcho(address echoAddress) external onlyOwner {
         require(echos.contains(echoAddress), "unknown echo");
@@ -123,11 +141,6 @@ contract Tree is Ownable, ITree, ReentrancyGuard {
     {
         require(echos.contains(echoAddress), "unknown echo");
         Echo(echoAddress).updateAuthor(authorAddress);
-    }
-
-    // Updates the base URI used as a prefix by all Echos. See echoBaseURI() `
-    function setBaseURI(string memory _baseURI) external onlyOwner {
-        baseURI = _baseURI;
     }
 
     // This allows the owner to withdraw any received funds.
