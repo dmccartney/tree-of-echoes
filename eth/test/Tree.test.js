@@ -20,12 +20,12 @@ describe("TreeOfEchoes", function () {
   });
 
   it("initial tree has no echo", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
     expect(await tree.echoCount()).to.equal(0);
   });
 
   it("creating an echo mints to the author and the tree", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
     await tree
       .connect(AUTHOR_A)
       .createEcho(asBytes32("Echo Title"), SALE_PRICE, 10);
@@ -36,15 +36,42 @@ describe("TreeOfEchoes", function () {
     expect(await echo.balanceOf(AUTHOR_A.address)).to.equal(1);
     expect(await echo.balanceOf(tree.address)).to.equal(1);
     expect(await echo.tokenURI(0)).to.equal(
-      `https://example.com/${echo.address.toLowerCase()}/0`
+      `https://example.com/${echo.address.toLowerCase()}/0.json`
     );
     expect(await echo.tokenURI(1)).to.equal(
-      `https://example.com/${echo.address.toLowerCase()}/1`
+      `https://example.com/${echo.address.toLowerCase()}/1.json`
+    );
+  });
+
+  it("after sealing a generation to IPFS, token URIs should point there", async function () {
+    let { tree, renderer } = await deployTree("https://example.com/");
+
+    let generationId = uuid.parse("11111111-2222-1234-8888-111111111111");
+    await tree.setGenerationId(generationId);
+
+    await tree
+      .connect(AUTHOR_A)
+      .createEcho(asBytes32("Echo Title"), SALE_PRICE, 10);
+    let echo = await echoContractAt(tree, 0);
+
+    expect(await echo.generation()).to.equal(generationId);
+
+    // Before sealing to IPFS
+    expect(await echo.tokenURI(0)).to.equal(
+      `https://example.com/${echo.address.toLowerCase()}/0.json`
+    );
+
+    // Seal that generation to IPFS (e.g. after we've uploaded all the files)
+    await renderer.sealToIPFS(generationId, "foo-bar-CID");
+
+    // After sealing to IPFS
+    expect(await echo.tokenURI(0)).to.equal(
+      `ipfs://foo-bar-CID/${echo.address.toLowerCase()}/0.json`
     );
   });
 
   it("echo contract addresses are deterministic", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
     expect(await tree.echoCount()).to.equal(0);
 
     // Predict the echo address
@@ -67,7 +94,7 @@ describe("TreeOfEchoes", function () {
   });
 
   it("the tree can enumerate the echos", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
     await tree
       .connect(AUTHOR_A)
       .createEcho(asBytes32("Echo Title Aye"), SALE_PRICE, 10);
@@ -93,7 +120,7 @@ describe("TreeOfEchoes", function () {
   });
 
   it("identifiers can be uuids", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
     let IDs = [
       { author: AUTHOR_A, id: "11111111-1111-1111-8888-111111111111" },
       { author: AUTHOR_B, id: "22222222-2222-2222-8888-222222222222" },
@@ -127,7 +154,7 @@ describe("TreeOfEchoes", function () {
   });
 
   it("free mints are free", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
 
     await tree
       .connect(AUTHOR_A)
@@ -140,7 +167,7 @@ describe("TreeOfEchoes", function () {
   });
 
   it("authors can update their price", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
 
     await tree
       .connect(AUTHOR_A)
@@ -159,7 +186,7 @@ describe("TreeOfEchoes", function () {
   });
 
   it("supply limits are enforced", async function () {
-    let tree = await deployTree("https://example.com/");
+    let { tree, renderer } = await deployTree("https://example.com/");
     await tree
       .connect(AUTHOR_A)
       .createEcho(asBytes32("Echo Title"), SALE_PRICE, 10);
@@ -176,12 +203,15 @@ describe("TreeOfEchoes", function () {
 });
 
 // Helpers
-async function deployTree(baseURI) {
+async function deployTree(defaultBaseURI) {
+  const Renderer = await ethers.getContractFactory("Renderer");
+  const renderer = await Renderer.deploy(defaultBaseURI);
+  await renderer.deployed();
   const Tree = await ethers.getContractFactory("Tree");
   const tree = await Tree.deploy();
   await tree.deployed();
-  await tree.setBaseURI(baseURI);
-  return tree;
+  await tree.setRenderer(renderer.address);
+  return { tree, renderer };
 }
 
 async function echoContractAt(tree, index) {

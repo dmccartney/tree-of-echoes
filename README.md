@@ -17,3 +17,6 @@ the coven can update the author on an `Echo` or remove a misbehaving `Echo` from
 
 - the `Tree` uses [EIP 1167](https://eips.ethereum.org/EIPS/eip-1167) to clone-create each `Echo` as a stand-alone ERC721 with its own address etc.
 - each `Echo` has a deterministic address based on a supplied `bytes32 identifier` (so we know it's address ahead-of-time)
+- each `Echo` defers to the `Tree` to "render" the `tokenURI`
+- the `Tree` has a configurable `Renderer` which it, in turn, uses to generate each `tokenURI`
+- the `Renderer` can be changed later but this edition produces IPFS URIs (when the Echo has been sealed to IPFS) and falls back to a web URI when it hasn't been sealed yet. 
